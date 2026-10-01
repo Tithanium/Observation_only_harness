@@ -9,7 +9,7 @@ interactive terminal UI, slash commands, pi-compatible extensions, skills,
 subagents — but **observation-only**: every tool the LLM can call
 (`read`, `grep`, `find`, `ls`, `fetch`) is read-only and scope-guarded; nothing
 in the tool schema can modify user data (audit trail in
-`work/audit-readonly-guarantee.md`).
+`audit-readonly-guarantee.md`).
 
 | Folder | Content |
 |---|---|
@@ -17,11 +17,8 @@ in the tool schema can modify user data (audit trail in
 | `.Observation_only/` | The personal configuration (a copy of `%USERPROFILE%\.Observation_only`; on the dev machine it is a **junction** to it, so git tracks the live config): `extensions/` (incl. the `alan-connector/` ALAN flow), `skills/`, `agents/`, `settings.json`, `models.json` (apiKey masked), `agent/` (`models.json` masked, `models-store.json`, `bin/fd.exe` + `bin/rg.exe`) |
 | `agents/` | Standalone agent definition in development (`worker.md`) |
 | `pi-cfg/` | Empty placeholder for pi configuration references |
-| `test-rig/` | Isolated test harness: mock model server + its own `work/isolated` dot-folder, so probes run without touching the live config |
-| `test_trees/` | Fixture file trees for the probes (`sample/`) |
-| `work/` | Probes, e2e scripts, request dumps (`requests_*.jsonl`), the read-only-guarantee audit, render-parity plans |
 | `okf/` | OKF bundle (log) for this project |
-| root | `pi_checksum_baseline.txt` + `probe-diff.mjs` + `RENDER_PARITY_AUDIT.md` (render-parity vs pi artifacts), `PROGRESS_history_*.md`, `bug.md` / `bug-ghost-pi.md`, `big.txt` (2 500-line truncation fixture), `Export_to_git.txt` (the install lines as plain text), `_pdffilter_test.mjs` |
+| root | `Export_to_git.txt` (the install lines as plain text), `audit-readonly-guarantee.md` (the read-only-guarantee audit) |
 
 **Portable by design**: the harness **always** reads its config from the user
 profile (`%USERPROFILE%\.Observation_only` / `~/.Observation_only`) — never from
@@ -284,9 +281,7 @@ surface.
   must use erasable syntax (no enums/namespaces/parameter properties).
 - **Observation-only guarantee**: five per-tool adversarial audits — no
   in-schema tool invocation can modify user data; symlink/junction escapes
-  closed at all tool entry points (`work/audit-readonly-guarantee.md`).
-  Render parity with pi is tracked in `RENDER_PARITY_AUDIT.md` against the
-  `pi_checksum_baseline.txt` baseline (`probe-diff.mjs` compares).
+  closed at all tool entry points (`audit-readonly-guarantee.md`).
 - **Update cycle from this repo**: after changing anything in the harness or
   in the dot-folder, `git add -A && git commit -m "..." && git push` (private
   repo — keep it that way; the junction means live config changes show up in

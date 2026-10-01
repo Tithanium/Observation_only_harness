@@ -1,6 +1,0 @@
-[
-  { "wait": { "marker": "New session started", "count": 1, "idleAfter": 500 }, "maxMs": 45000, "type": "" },
-  { "wait": { "idle": 700 }, "maxMs": 10000, "type": "<esc>" },
-  { "wait": { "idle": 700 }, "maxMs": 10000, "type": "<c-c>" },
-  { "wait": { "marker": "bye", "count": 1, "idleAfter": 300 }, "maxMs": 10000, "type": "" }
-]
