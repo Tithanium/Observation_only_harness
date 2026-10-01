@@ -189,26 +189,6 @@ export function resolveApiKey(providerId, providerConfig, cliApiKey) {
   return undefined;
 }
 
-/** create_folder_path — the round-2 map_folder_walk feature switch (the harness
- *  start writes map_folder.md / map_folder_full.md ONLY when the variable is ON;
- *  default FALSE → the initial folder-map walk never runs: nothing is scanned
- *  and no map file is created/updated anywhere, the harness still starts).
- *  Resolution order, AT CALL TIME (tests flip it via the env FIRST — the env
- *  override wins over the settings flag): env OBSERVATION_ONLY_CREATE_FOLDER_PATH
- *  ("true"/"1"/"yes") → settings.json "create_folder_path" (boolean) → false.
- *  Never cached: the flag can change between calls (settings #.pi/settings.json
- *  override merged over the global one). */
-export function resolveCreateFolderPath() {
-  const env = process.env.OBSERVATION_ONLY_CREATE_FOLDER_PATH;
-  if (env !== undefined) {
-    const v = env.trim().toLowerCase();
-    return v === "true" || v === "1" || v === "yes";
-  }
-  const settings = loadSettings();
-  if (typeof settings.create_folder_path === "boolean") return settings.create_folder_path;
-  return false; // create_folder_path=false by default: the folder-map walk is OFF
-}
-
 /** Resolved selection: provider/model from settings.json (or CLI overrides) + api key. */
 export function resolveSelection(overrides = {}) {
   const settings = loadSettings();

@@ -114,14 +114,12 @@ export async function buildHarnessTools(workDir) {
   return { tools, toolByName };
 }
 
-/** The first message of an exchange carries the harness door: the working folder's
- *  map_folder.md path, relative to the working folder (map_folder_walk, round 2),
- *  and map_folder_full.md — the FULL structure of the working folder as ONE mermaid
- *  graph. That file contains ALL folders and files (not only the working folder —
- *  everything) and can be LARGE: it should be read by a SUBAGENT, which extracts
- *  the paths of interest. */
-export function userContent(mapRef, fullMapRef, message) {
-  return `Working folder map_folder.md: ${mapRef} — one line per file and per subfolder there, paths relative to the working folder.\nmap_folder_full.md: ${fullMapRef} — the full structure of the working folder as ONE mermaid graph: it contains ALL folders and files (not only the working folder's own) and can be LARGE — it is not meant to be read whole: use the subagent tool to have a subagent read it and extract the paths of interest.\n\n${message}`;
+/** The first message of an exchange IS the user's message. (The round-2 harness
+ *  door — the map_folder.md / map_folder_full.md references — was REMOVED
+ *  2026-10-01: the harness no longer writes folder maps at start, and the model
+ *  explores the working folder with the harness's own ls/grep/find tools.) */
+export function userContent(message) {
+  return message;
 }
 
 /**
@@ -136,12 +134,12 @@ export function userContent(mapRef, fullMapRef, message) {
  * and the interactive session prints them inside its loop.
  */
 export async function driveTurn(client, messages, options) {
-  const { mapRef, fullMapRef, workDir, systemPrompt, output = () => {} } = options;
+  const { workDir, systemPrompt, output = () => {} } = options;
   const onTool = options.onTool; // piece-3: the CHART's structured tool events — {kind:"call", name, args} then {kind:"result", name, blocks, text, isError, exitCode} — rendered by screen.toolEvent (pi's tool-execution blocks); line mode keeps the plain `output` lines below
   const onMessage = options.onMessage; // round 17: EVERY message of the turn (user, assistant with its thinking/text/toolCall blocks, toolResult) is handed to the session STORE as it enters the transcript — the interactive session's auto-save (pi: append after every message); undefined in the one-shot path — unchanged there
   const toolsMap = options.toolsMap ?? (await buildHarnessTools(workDir));
   const model = { id: client.modelId, input: ["text"] };
-  const userMessage = { role: "user", content: userContent(mapRef, fullMapRef, options.message), timestamp: Date.now() }; // the stored user message IS THE EXACT LLM PAYLOAD — the door-prefixed transcript entry (the full text the round trip carried — pi stores the actual message the model received); the session file therefore holds EVERYTHING the LLM saw, not the bare typed line — normalizeMessage (session_store) wraps the string into a text block for the file
+  const userMessage = { role: "user", content: userContent(options.message), timestamp: Date.now() }; // the stored user message IS THE EXACT LLM PAYLOAD — the full text the round trip carried (pi stores the actual message the model received); the session file therefore holds EVERYTHING the LLM saw — normalizeMessage (session_store) wraps the string into a text block for the file
   messages.push(userMessage);
   onMessage?.(userMessage);
   let reply = await client.run(messages, { systemPrompt, signal: options.signal, onPartial: options.onPartial, tools: toolsMap.tools }); // round 10: the interactive session's Ctrl+C travels as the request signal (abort → AbortError → the caller prints "(interrupted)"); round 16: onPartial (the interactive chart's live stream — thinking italic / answer bold) travels the same way; round 17: the persisted messages travel via onMessage — all three undefined in the one-shot path — unchanged there; ROUND 18: `tools: toolsMap.tools` — THE tool-declaration fix: pi-ai's normalizeContext folds context.tools into the head system message's toolsAdded → buildParams emits params.tools (native function calling) → the model CAN produce a toolCall block the harness executes → the tool result goes back into the transcript. Before round 18 the tools were never declared ANYWHERE in the request: the model answered in prose, the harness saw no toolCall block — the observed "tool use fails" of the real LLM.

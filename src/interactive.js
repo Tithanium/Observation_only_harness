@@ -2,7 +2,7 @@
 // src/interactive.js
 // Rounds 10 + 11: the INTERACTIVE session. Launching Observation_only with no
 // message on a terminal must NOT print a usage message — it IS the harness:
-// the map_folder_walk line, a banner (model, work dir, footer), a prompt for the
+// a banner (model, work dir, footer), a prompt for the
 // next line, multi-turn interaction through the SAME driveTurn as the one-shot
 // path (fetch + subagent), the footer after every turn, and the "/"
 // commands (evaluated subset) + keyboard shortcuts. One-shot mode (message
@@ -792,11 +792,11 @@ async function pickByLines(reader, out, title, items, state, initialQuery = "") 
   }
 }
 
-/** The interactive session. `mapRef` must be the map_folder_walk reference the
- *  caller computed and `client` an already-connected client; `toolsMap` an
- *  already-built tool map (read + fetch + subagent) or nothing (built on the
- *  first turn). Runs until /quit /exit, Ctrl+C (idle) or Ctrl+D. Resolves to the
- *  number of turns run. */
+/** The interactive session. `client` must be an already-connected client and
+ *  `workDir` the settled working folder (the user-specified one, 2026-09-30);
+ *  `toolsMap` an already-built tool map (fetch + subagent + grep/find/ls) or
+ *  nothing (built on the first turn). Runs until /quit /exit, Ctrl+C (idle)
+ *  or Ctrl+D. Resolves to the number of turns run. */
 export async function runInteractiveSession(opts) {
   await loadExtensions(); // ROUND 20: extensions autoload BEFORE the first line — the dot-folder's extensions/ .ts files register their commands (src/extensions.js); a missing/empty extensions dir is a no-op. ROUND 21: every load imports FRESH module copies (the module URL key carries a per-load nonce, pi's clearExtensionCache) — CHANGED extension code IS picked up on /reload, no restart needed.
   // Round 16: the GRAPHICAL CHART (src/screen.js) — entered ONLY when the caller
@@ -805,8 +805,7 @@ export async function runInteractiveSession(opts) {
   // LINE mode below is byte-identical to rounds 10/11.
   const screen = opts.screen ? (typeof opts.screen === "object" ? opts.screen : createScreen({ output: opts.output ?? process.stdout })) : null;
   const out = screen ? (s) => screen.out(s) : (opts.out ?? ((s) => process.stdout.write(s + "\n")));
-  const { mapRef, workDir, overrides } = opts;
-  const fullMapRef = opts.fullMapRef ?? "map_folder_full.md"; // (round-10/11 suites pass a bare mapRef; the real launch always ships both)
+  const { workDir, overrides } = opts;
   const systemPrompt = opts.systemPrompt ?? harnessSystemPrompt();
   const drive = opts.driveTurn ?? driveTurn; // injected driveTurn lets the round-10 suite feed canned turns (no live LLM); the real path IS the shared driveTurn
   let messages = [];
@@ -1055,7 +1054,7 @@ export async function runInteractiveSession(opts) {
     if (screen) screen.repaint(); // ROUND 19: readline's prompt refresh clears from the prompt row DOWN (\x1b[0J) — that wipes the BOTTOM bar and the FOOTER every prompt; the repaint (paint always rewrites the pinneD rows) brings them back before the user's next input
     if (line === null) break; // Ctrl+D / EOF → quit
     if (!line.trim()) continue;
-    const cmdCtx = { providerId: client.providerId, modelId: client.modelId, workDir, mapRef, fullMapRef, ui, hasUI: Boolean(uiSurface), model: undefined, thinkingLevel: undefined }; // the handler ctx of extension commands too (round 20: pi's command handler (args, ctx); round 21: ctx.ui — git_it.ts and alan-connector.ts call ctx.ui.notify; ROUND 24: hasUI:true in the chart — /ALAN_connector then proposes the model (ctx.ui.custom) and parks the summary under the editor (ctx.ui.setWidget); line mode keeps hasUI:false → pi's headless probe-default + console.log)
+    const cmdCtx = { providerId: client.providerId, modelId: client.modelId, workDir, ui, hasUI: Boolean(uiSurface), model: undefined, thinkingLevel: undefined }; // the handler ctx of extension commands too (round 20: pi's command handler (args, ctx); round 21: ctx.ui — git_it.ts and alan-connector.ts call ctx.ui.notify; ROUND 24: hasUI:true in the chart — /ALAN_connector then proposes the model (ctx.ui.custom) and parks the summary under the editor (ctx.ui.setWidget); line mode keeps hasUI:false → pi's headless probe-default + console.log)
     const cmd = (() => {
       const c = handleCommand(line, cmdCtx);
       // pi's /skill:name (agent-session.js _expandSkillCommand): the expanded
@@ -1347,8 +1346,6 @@ export async function runInteractiveSession(opts) {
               screen.addUserPrompt(followText);
             }
             const { text: followReply } = await drive(client, messages, {
-              mapRef,
-              fullMapRef,
               workDir,
               systemPrompt,
               toolsMap,
@@ -1440,8 +1437,6 @@ export async function runInteractiveSession(opts) {
         screen.addUserPrompt(line); // the user prompt between TWO lines of underscores (one above, one below)
       }
       const { text } = await drive(client, messages, {
-        mapRef,
-        fullMapRef,
         workDir,
         systemPrompt,
         toolsMap,

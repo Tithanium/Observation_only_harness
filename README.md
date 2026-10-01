@@ -245,9 +245,8 @@ harness must survive loading the pi dir.
 ### Memory & configuration (root of `.Observation_only/`)
 
 `AGENTS.md` (session rules) · `settings.json` (`defaultProvider: alan`,
-`defaultModel: qwen-3.8-27b`, dark theme, `create_folder_path: false` — the
-launch folder-map walk; the pi-style `packages` list is inert — the pi package
-flow is not part of the harness) · `models.json` (**apiKey masked as
+`defaultModel: qwen-3.8-27b`, dark theme; the pi-style `packages` list is inert
+— the pi package flow is not part of the harness) · `models.json` (**apiKey masked as
 `sk-REMPLACEZ_PAR_VOTRE_CLE`**) · `agent/` (`models.json` masked,
 `models-store.json`, `bin/fd.exe` + `bin/rg.exe`)
 

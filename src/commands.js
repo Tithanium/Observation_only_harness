@@ -45,7 +45,7 @@ export const COMMANDS = [
   { name: "/quit", usage: "/quit", describe: "quit the harness (alias: /exit)" },
   { name: "/new", usage: "/new", describe: "reset the transcript — fresh session, same work dir" },
   { name: "/clear", usage: "/clear", describe: "alias for /new — pi's former /clear (pi renamed it to /new; its clear handler is handleClearCommand, interactive-mode.js:5528)" },
-  { name: "/info", usage: "/info", describe: "session facts: provider, model, work dir, map_folder_walk, footer" },
+  { name: "/info", usage: "/info", describe: "session facts: provider, model, work dir, footer" },
   { name: "/model", usage: "/model [<provider/model>]", describe: "Select model (opens selector UI)" },
   { name: "/hotkeys", usage: "/hotkeys", describe: "keyboard shortcuts (enter, arrows, home/end, ctrl+o, ctrl+c, ctrl+d)" },
   { name: "/reload", usage: "/reload", describe: "re-read settings.json + models.json (transcript kept)" },

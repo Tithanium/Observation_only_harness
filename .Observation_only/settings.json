@@ -2,7 +2,6 @@
     "defaultProvider":  "alan",
     "defaultModel":  "qwen-3.8-27b",
     "lastChangelogVersion":  "0.86.1",
-    "create_folder_path":  false,
     "theme":  "dark",
     "packages":  [
                      "npm:pi-okf",
