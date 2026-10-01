@@ -1,0 +1,113 @@
+{
+    "providers":  {
+                      "alan":  {
+                                   "baseUrl":  "https://alan.univ-grenoble-alpes.fr/api",
+                                   "api":  "openai-completions",
+                                   "apiKey":  "sk-REMPLACEZ_PAR_VOTRE_CLE",
+                                   "models":  [
+                                                  {
+                                                      "id":  "albator",
+                                                      "name":  "albator (32k)",
+                                                      "contextWindow":  32768,
+                                                      "maxTokens":  32768
+                                                  },
+                                                  {
+                                                      "id":  "ILAAS/.qwen-3.8-27b",
+                                                      "name":  "ILAAS/.qwen-3.8-27b (32k)",
+                                                      "contextWindow":  32768,
+                                                      "maxTokens":  32768
+                                                  },
+                                                  {
+                                                      "id":  "ILAAS/.gemma-4-31b",
+                                                      "name":  "ILAAS/.gemma-4-31b (32k)",
+                                                      "contextWindow":  32768,
+                                                      "maxTokens":  32768
+                                                  },
+                                                  {
+                                                      "id":  "ILAAS/.gpt-oss-120b",
+                                                      "name":  "ILAAS/.gpt-oss-120b (32k)",
+                                                      "contextWindow":  32768,
+                                                      "maxTokens":  32768
+                                                  },
+                                                  {
+                                                      "id":  "ILAAS/.llama-3.1-8b",
+                                                      "name":  "ILAAS/.llama-3.1-8b (32k)",
+                                                      "contextWindow":  32768,
+                                                      "maxTokens":  32768
+                                                  },
+                                                  {
+                                                      "id":  "ILAAS/.mistral-medium-latest",
+                                                      "name":  "ILAAS/.mistral-medium-latest (32k)",
+                                                      "contextWindow":  32768,
+                                                      "maxTokens":  32768
+                                                  },
+                                                  {
+                                                      "id":  "ILAAS/.mistral-small-4-119b",
+                                                      "name":  "ILAAS/.mistral-small-4-119b (32k)",
+                                                      "contextWindow":  32768,
+                                                      "maxTokens":  32768
+                                                  },
+                                                  {
+                                                      "id":  "ILAAS/.qwen-3.6-35b-instruct",
+                                                      "name":  "ILAAS/.qwen-3.6-35b-instruct (32k)",
+                                                      "contextWindow":  32768,
+                                                      "maxTokens":  32768
+                                                  },
+                                                  {
+                                                      "id":  "qwen-3.8-27b",
+                                                      "name":  "qwen-3.8-27b (256k)",
+                                                      "contextWindow":  262144,
+                                                      "maxTokens":  32768
+                                                  },
+                                                  {
+                                                      "id":  "ARES/DeepSeek-V4-Flash-0731",
+                                                      "name":  "ARES/DeepSeek-V4-Flash-0731 (125k)",
+                                                      "contextWindow":  128000,
+                                                      "maxTokens":  32768
+                                                  },
+                                                  {
+                                                      "id":  "ARES/Leanstral-1.5-119B-A6B",
+                                                      "name":  "ARES/Leanstral-1.5-119B-A6B (102.2k)",
+                                                      "contextWindow":  104688,
+                                                      "maxTokens":  32768
+                                                  },
+                                                  {
+                                                      "id":  "gemma-4-31b",
+                                                      "name":  "ARES/gemma-4-31b  (gemma-4-31b) (209.4k)",
+                                                      "contextWindow":  214464,
+                                                      "maxTokens":  32768
+                                                  },
+                                                  {
+                                                      "id":  "gpt-oss-120b",
+                                                      "name":  "ARES/gpt-oss-120b  (gpt-oss-120b) (125k)",
+                                                      "contextWindow":  128000,
+                                                      "maxTokens":  32768
+                                                  },
+                                                  {
+                                                      "id":  "mistral-small-4-119b",
+                                                      "name":  "ARES/mistral-small-4-119b  (mistral-small-4-119b) (125k)",
+                                                      "contextWindow":  128000,
+                                                      "maxTokens":  32768
+                                                  },
+                                                  {
+                                                      "id":  "qwen-3.6-35b-instruct",
+                                                      "name":  "ARES/qwen-3.6-35b-instruct  (qwen-3.6-35b-instruct) (256k)",
+                                                      "contextWindow":  262144,
+                                                      "maxTokens":  32768
+                                                  },
+                                                  {
+                                                      "id":  "ARES/alan-transcript",
+                                                      "name":  "ARES/alan-transcript (0.4k)",
+                                                      "contextWindow":  448,
+                                                      "maxTokens":  32768
+                                                  },
+                                                  {
+                                                      "id":  "ares-bge-m3",
+                                                      "name":  "ares-bge-m3 (8k)",
+                                                      "contextWindow":  8192,
+                                                      "maxTokens":  32768
+                                                  }
+                                              ]
+                               }
+                  }
+}
