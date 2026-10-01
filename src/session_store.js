@@ -207,6 +207,40 @@ function makeStore(state) {
     return path;
   }
 
+  /** The session as a TREE (pi's SessionManager.getTree, dist/core/session-manager.js
+   *  ported): one node per entry ({ entry, children: [] }), roots = entries whose
+   *  parentId is null/undefined — plus ORPHANS (a broken parent chain) which pi
+   *  also returns as roots, so no entry can silently vanish from the tree. Children
+   *  are sorted by TIMESTAMP (oldest first, newest at the bottom) — pi's exact
+   *  ordering (iterative, deep-tree safe). The /tree picker flattens THIS once:
+   *  row and entry id are born in the same walk (pi's TreeList.flattenTree).
+   *  NOTE the old harness code walked this tree for DISPLAY but zipped the rows
+   *  against getEntries() (append order) — the two orders diverge on any branched
+   *  session and the picker selected the wrong entry. */
+  function getTree() {
+    const nodes = new Map();
+    const roots = [];
+    for (const e of entries) nodes.set(e.id, { entry: e, children: [] });
+    for (const e of entries) {
+      const node = nodes.get(e.id);
+      if (e.parentId === null || e.parentId === undefined) {
+        roots.push(node);
+      } else {
+        const parent = nodes.get(e.parentId);
+        if (parent) parent.children.push(node);
+        else roots.push(node); // orphan — broken parent chain (pi: treated as a root)
+      }
+    }
+    const ts = (n) => new Date(n.entry.timestamp ?? 0).getTime();
+    const stack = [...roots]; // iterative, post-order sort (pi avoids recursion on deep trees)
+    while (stack.length > 0) {
+      const node = stack.pop();
+      node.children.sort((a, b) => ts(a) - ts(b));
+      stack.push(...node.children);
+    }
+    return roots;
+  }
+
   /** The transcript to CONTINUE with: the root→leaf path reduced to what the LLM
    *  round trip accepts ({role, content[, toolCallId/toolName/isError]} — pi's
    *  buildContextEntries: model_change entries and friends are not LLM context). */
@@ -223,7 +257,7 @@ function makeStore(state) {
       });
   }
 
-  return { dir, file, header, sessionId, appendMessage, appendHead, appendModelChange, branch, getEntries, getEntry, getBranch, getMessages, leafId: () => leafId };
+  return { dir, file, header, sessionId, appendMessage, appendHead, appendModelChange, branch, getEntries, getEntry, getBranch, getMessages, getTree, leafId: () => leafId };
 }
 
 /** A FRESH session for the interactive launch (/new re-creates one): pi's deferred

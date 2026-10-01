@@ -53,7 +53,7 @@ export const COMMANDS = [
   { name: "/skill:<name>", usage: "/skill:<name>", menu: false, describe: "load a skill's full instructions into the conversation (pi's /skill:name) — the slash menu lists one row per skill" },
   { name: "/agents:<name>", usage: "/agents:<name> [task]", menu: false, describe: "run an agent: with a task it runs via the subagent path, without one its definition is shown — the slash menu lists one row per agent" },
   { name: "/resume", usage: "/resume", describe: "pick a saved session of this work dir to continue (search, ↑/↓, enter, esc cancels)" },
-  { name: "/tree", usage: "/tree", describe: "the conversation as a branch tree (↑/↓, enter selects — on a terminal a user entry's text lands IN the input line, enter submits it; esc cancels)" },
+  { name: "/tree", usage: "/tree", describe: "the conversation as a branch tree (opens at the active leaf · • marks the active path — ↑/↓, enter selects; a user entry re-enters its text into the input line (only when empty) and continues from its PARENT, enter submits it; esc cancels)" },
 ];
 
 /** The keyboard shortcuts, as implemented by the interactive session (round 10):

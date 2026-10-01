@@ -591,33 +591,53 @@ function entryLabel(e) {
   return `${m?.role ?? "?"}: "${t.slice(0, 48)}"`;
 }
 
-/** The conversation rendered as its BRANCH TREE (pi's tree-selector ported):
- *  connector glyphs (├─ / └─ with │ runs), one row per entry, the ACTIVE LEAF
- *  marked with `\`• ``, user/assistant/tool labels. Deterministic — the rows are
- *  the picker's browse lines AND the suite's inspection surface. */
-export function renderTreeLines(store) {
-  const entries = store.getEntries();
-  if (entries.length === 0) return [];
-  const children = new Map();
-  for (const e of entries) {
-    const key = e.parentId ?? "";
-    if (!children.has(key)) children.set(key, []);
-    children.get(key).push(e);
-  }
+/** The conversation rendered as its BRANCH TREE (pi's tree-selector method):
+ *  ONE walk of the store's tree (store.getTree — pi's SessionManager.getTree port)
+ *  producing { id, line } pairs BORN TOGETHER in that walk — pi's TreeList
+ *  flattens its tree exactly this way (flattenTree: each flat node carries its
+ *  entry AND its rendered position). The old code walked the tree for DISPLAY
+ *  and then zipped the rows against store.getEntries() (append order): the two
+ *  orders diverge on any BRANCHED session (the whole point of /tree), so row i
+ *  displayed entry X's text but selected entry Y — the picker navigated to the
+ *  wrong entry (and the `• ` active-leaf marker landed on a row that selected a
+ *  different branch). Orphans (broken parent chain) are roots — pi's getTree
+ *  rule, so no entry can silently vanish from the picker. The `• ` marker marks
+ *  EVERY entry of the active root→leaf path (pi's activePathIds path marker),
+ *  not only the leaf. Deterministic — the items are the picker's browse lines
+ *  AND the suite's inspection surface. */
+export function treeItems(store) {
   const leafId = store.leafId();
-  const roots = children.get("")?.length ? children.get("") : [entries[0]];
-  const rows = [];
-  const walk = (list, prefix) => {
-    list.forEach((e, i) => {
-      const last = i === list.length - 1;
-      const row = `${e.id === leafId ? "• " : "  "}${prefix}${last ? "└─ " : "├─ "}${entryLabel(e)}`; // `• ` marks the ACTIVE LEAF
-      rows.push(row);
-      const kids = children.get(e.id);
-      if (kids?.length) walk(kids, prefix + (last ? "   " : "│  "));
-    });
-  };
-  walk(roots, "");
-  return rows;
+  // the ACTIVE root→leaf path (pi's buildActivePath: walk leaf → root)
+  const activePath = new Set();
+  let cur = leafId ? store.getEntry(leafId) : undefined;
+  while (cur) {
+    activePath.add(cur.id);
+    cur = cur.parentId ? store.getEntry(cur.parentId) : undefined;
+  }
+  const roots = store.getTree();
+  const items = [];
+  // iterative pre-order (pi flattens iteratively — deep trees must not overflow
+  // the stack): children are pushed in REVERSE so the first child is processed
+  // first; each frame already knows its `last` flag (its index among siblings).
+  const stack = [];
+  for (let i = roots.length - 1; i >= 0; i--) stack.push({ node: roots[i], prefix: "", last: i === roots.length - 1 });
+  while (stack.length) {
+    const { node, prefix, last } = stack.pop();
+    const e = node.entry;
+    const marker = activePath.has(e.id) ? "• " : "  "; // `• ` marks the ACTIVE PATH (pi)
+    items.push({ id: e.id, line: `${marker}${prefix}${last ? "└─ " : "├─ "}${entryLabel(e)}` });
+    const kids = node.children;
+    const childPrefix = prefix + (last ? "   " : "│  ");
+    for (let i = kids.length - 1; i >= 0; i--) stack.push({ node: kids[i], prefix: childPrefix, last: i === kids.length - 1 });
+  }
+  return items;
+}
+
+/** The line-only view of treeItems() (kept export — deterministic rows, the
+ *  suite's inspection surface; the picker itself consumes treeItems so row and
+ *  entry id can never drift apart again). */
+export function renderTreeLines(store) {
+  return treeItems(store).map((it) => it.line);
 }
 
 /** The picker engine. `items` is the browse list ({ id, line } — for /tree the
@@ -1066,14 +1086,38 @@ export async function runInteractiveSession(opts) {
         continue;
       }
       if (cmd.action === "tree") {
-        // Round 17: pi's session-tree navigator — the conversation as a branch tree.
-        const rows = renderTreeLines(store);
-        if (rows.length === 0) {
+        // Round 17 — pi's session-tree navigator, pi's METHOD (agent-session.js
+        // navigateTree + TreeList): the picker items come from ONE walk of the
+        // store's tree (treeItems — row and entry id born together, so the
+        // old row/entry zip mismatch is gone). The cursor OPENS on the active
+        // leaf (pi: initialSelectedId ?? currentLeafId via findNearestVisibleIndex
+        // — nearest listed ancestor when the leaf is not in the list, last entry
+        // as fallback). Selecting the CURRENT LEAF is a NO-OP (pi: "Already at
+        // this point"). A USER entry moves the leaf to its PARENT and puts its
+        // text into the input line ONLY when the line is empty (pi:
+        // result.editorText && !editor.getText().trim()) — the next Enter
+        // SUBMITS it; any other entry becomes the new leaf. The SAME session
+        // file keeps receiving appends (pi's navigateTree stays in the file —
+        // the abandoned branch is history, never deleted).
+        const items = treeItems(store);
+        if (items.length === 0) {
           out("tree: no entries yet");
           continue;
         }
-        const items = store.getEntries().map((e, i) => ({ id: e.id, line: rows[i] ?? entryLabel(e) }));
-        picker = runPicker({ reader, input: reader.input, out, title: "tree — the conversation branches · • marks the active leaf (↑/↓ · enter selects, esc cancels):", items, screen });
+        const leafId = store.leafId();
+        let startIndex = items.findIndex((it) => it.id === leafId); // pi: the picker opens on the active leaf
+        if (startIndex < 0) {
+          // the leaf is not listed (hidden/future filter) → nearest listed
+          // ANCESTOR (pi's findNearestVisibleIndex walks leaf → root)
+          let anc = leafId ? store.getEntry(leafId) : null;
+          while (anc && startIndex < 0) {
+            const i = items.findIndex((it) => it.id === anc.id);
+            if (i >= 0) startIndex = i;
+            anc = anc.parentId ? store.getEntry(anc.parentId) : null;
+          }
+          if (startIndex < 0) startIndex = items.length - 1; // pi's fallback: last visible entry
+        }
+        picker = runPicker({ reader, input: reader.input, out, title: "tree — the conversation branches · • marks the active path (↑/↓ · enter selects, esc cancels):", items, screen, startIndex });
         const picked = await picker.promise;
         picker = null;
         reader.drainQueued();
@@ -1081,26 +1125,34 @@ export async function runInteractiveSession(opts) {
           out("tree cancelled");
           continue;
         }
+        if (picked.id === store.leafId()) {
+          out("tree: already at this point"); // pi: selecting the current leaf is a no-op — the old code re-branched (a leaf USER entry even moved back to its parent)
+          continue;
+        }
         const entry = store.getEntry(picked.id);
         if (!entry) continue;
         if (entry.type === "message" && entry.message?.role === "user") {
-          store.branch(entry.parentId); // a USER message branches from its PARENT; its text lands in the editor
+          store.branch(entry.parentId); // a USER message branches from its PARENT (pi: newLeafId = targetEntry.parentId); its text lands in the input line
           const text = contentText(entry.message.content);
           messages = store.getMessages();
           if (screen) screen.replaceTranscript(screenEntriesFor(messages)); // round 17: the chart shows the BRANCH point's conversation (new leaf = the branch point)
           out(`editor: ${text}`);
-          if (input.isTTY) {
-            // TERMINAL/pi-faithful placement: pi puts the selected entry's text INTO the
-            // input line with the cursor at the end — the next Enter SUBMITS it as the
-            // message (the branch above already moved the leaf to the user entry's PARENT).
-            // The deterministic non-TTY LINE mode keeps the `editor: <text>` print only.
-            reader.rl.line = text;
-            reader.rl.cursor = text.length;
-            reader.renderPrompt?.(); // PIECE 1 (R1): the selection's text fills the WRITING line — the box renders it NOW (the old path only re-gated and waited for the next keystroke)
-            reader.rl._refreshLine?.();
+          if (input.isTTY && reader.rl) {
+            // TERMINAL/pi-faithful placement: pi puts the selected entry's text INTO
+            // the input line with the cursor at the end — but ONLY when the editor is
+            // EMPTY (pi's guard: result.editorText && !editor.getText().trim()); the
+            // next Enter SUBMITS it as the message (the branch above already moved
+            // the leaf to the user entry's PARENT). The deterministic non-TTY LINE
+            // mode keeps the `editor: <text>` print only.
+            if (!(reader.rl.line ?? "").trim()) {
+              reader.rl.line = text;
+              reader.rl.cursor = text.length;
+              reader.renderPrompt?.(); // PIECE 1 (R1): the selection's text fills the WRITING line — the box renders it NOW (the old path only re-gated and waited for the next keystroke)
+              reader.rl._refreshLine?.();
+            }
           }
         } else {
-          store.branch(entry.id); // assistant / tool → continue from THAT entry
+          store.branch(entry.id); // assistant / tool / model_change → continue from THAT entry (pi: newLeafId = targetId)
           messages = store.getMessages();
           if (screen) screen.replaceTranscript(screenEntriesFor(messages)); // round 17: the chart shows the branch point's conversation (main area refreshed, footer stays)
           out(`tree: continued at ${entry.type === "message" ? entry.message.role : entry.type}`);
