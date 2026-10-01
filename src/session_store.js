@@ -23,6 +23,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { userDotDir } from "./config.js";
+import { COMPACTION_SUMMARY_PREFIX, COMPACTION_SUMMARY_SUFFIX } from "./compaction.js";
 
 export const SESSION_VERSION = 3;
 
@@ -162,6 +163,23 @@ function makeStore(state) {
     return appendEntry({ type: "model_change", provider, modelId });
   }
 
+  /** Append a COMPACTION entry as the child of the current leaf, then advance
+   *  the leaf (pi's SessionManager.appendCompaction — the exact same shape:
+   *  {type:"compaction", summary, firstKeptEntryId, tokensBefore, details,
+   *  usage}). The compacted messages stay in the file (history is never
+   *  deleted — /tree can navigate back into it); only the LLM CONTEXT they
+   *  contribute is cut (getMessages below). */
+  function appendCompaction(summary, firstKeptEntryId, tokensBefore, details, usage) {
+    return appendEntry({
+      type: "compaction",
+      summary,
+      firstKeptEntryId,
+      tokensBefore,
+      details,
+      ...(usage !== undefined ? { usage } : {}),
+    });
+  }
+
   /** The HEAD entry (round 19): written when the session starts — pi's first
    *  message line is the payload ROOT: role "system" with the harness system
    *  sections + the DECLARED tool schemas (the payload the LLM round trip began
@@ -241,23 +259,75 @@ function makeStore(state) {
     return roots;
   }
 
-  /** The transcript to CONTINUE with: the root→leaf path reduced to what the LLM
-   *  round trip accepts ({role, content[, toolCallId/toolName/isError]} — pi's
-   *  buildContextEntries: model_change entries and friends are not LLM context). */
-  function getMessages() {
-    return getBranch()
-      .filter((e) => e.type === "message" && e.message?.role !== "system") // the head is the FILE's payload root (content "" + sections/toolsAdded), NOT conversation context — the harness sends its own systemPrompt
-      .map((e) => {
-        const m = e.message;
-        const out = { role: m.role, content: m.content };
-        if (m.toolCallId !== undefined) out.toolCallId = m.toolCallId;
-        if (m.toolName !== undefined) out.toolName = m.toolName;
-        if (m.isError !== undefined) out.isError = m.isError;
-        return out;
-      });
+  /** The active, COMPACTION-AWARE context entry list (pi's buildContextEntries,
+   *  dist/core/session-manager.js:194-231, ported): follow the root→leaf path;
+   *  when it carries compaction entries the LATEST one is represented by the
+   *  entry itself, followed by the kept entries starting at firstKeptEntryId
+   *  (up to the compaction) and ALL entries after the compaction; older
+   *  summarized entries are omitted. No compaction on the path → the whole
+   *  path (pi's non-compacted branch). */
+  function contextEntries() {
+    const path = getBranch();
+    let compaction = null;
+    for (let i = path.length - 1; i >= 0; i--) {
+      if (path[i].type === "compaction") {
+        compaction = path[i];
+        break;
+      }
+    }
+    if (!compaction) return path;
+    const compactionIdx = path.findIndex((entry) => entry.id === compaction.id);
+    if (compactionIdx < 0) return path;
+    const firstKeptIdx = path.findIndex((entry) => entry.id === compaction.firstKeptEntryId);
+    const start = firstKeptIdx >= 0 ? firstKeptIdx : compactionIdx + 1;
+    return [compaction, ...path.slice(start, compactionIdx), ...path.slice(compactionIdx + 1)];
   }
 
-  return { dir, file, header, sessionId, appendMessage, appendHead, appendModelChange, branch, getEntries, getEntry, getBranch, getMessages, getTree, leafId: () => leafId };
+  /** One context entry as LLM message(s): a compaction entry becomes the
+   *  head USER message carrying the summary (pi's convertToLlm for role
+   *  "compactionSummary": COMPACTION_SUMMARY_PREFIX + summary + SUFFIX) with
+   *  the entry's tokensBefore/details on the `compaction` marker (the driver
+   *  carries them into the next compaction like pi's entry details); a message
+   *  entry keeps its tool fields. The head (the file's payload root, role
+   *  "system") and model_change/other entries produce NOTHING (pi: model_change
+   *  entries are not LLM context). */
+  function entryToMessage(e) {
+    if (e.type === "compaction") {
+      return {
+        role: "user",
+        content: [{ type: "text", text: COMPACTION_SUMMARY_PREFIX + e.summary + COMPACTION_SUMMARY_SUFFIX }],
+        timestamp: new Date(e.timestamp ?? 0).getTime(),
+        compaction: { tokensBefore: e.tokensBefore, details: e.details },
+      };
+    }
+    if (e.type !== "message" || e.message?.role === "system") return null;
+    const m = e.message;
+    const out = { role: m.role, content: m.content };
+    if (m.toolCallId !== undefined) out.toolCallId = m.toolCallId;
+    if (m.toolName !== undefined) out.toolName = m.toolName;
+    if (m.isError !== undefined) out.isError = m.isError;
+    return out;
+  }
+
+  /** The transcript to CONTINUE with: the compaction-aware context entries
+   *  reduced to what the LLM round trip accepts (/resume and /tree rebuild the
+   *  live transcript from this — a compacted session resumes COMPACTED, exactly
+   *  like pi's reload-after-compaction). */
+  function getMessages() {
+    return contextEntries()
+      .map(entryToMessage)
+      .filter((m) => m !== null);
+  }
+
+  /** The store entry ids BEHIND getMessages() (1:1, same order, minus the
+   *  synthesized summary message which IS the compaction entry itself — it has
+   *  no message entry of its own). The compaction driver uses this to translate
+   *  the flat transcript's firstKeptIndex into pi's firstKeptEntryId. */
+  function getContextEntryIds() {
+    return contextEntries().filter((e) => e.type === "message" && e.message?.role !== "system").map((e) => e.id);
+  }
+
+  return { dir, file, header, sessionId, appendMessage, appendHead, appendModelChange, appendCompaction, branch, getEntries, getEntry, getBranch, getMessages, getContextEntryIds, getTree, leafId: () => leafId };
 }
 
 /** A FRESH session for the interactive launch (/new re-creates one): pi's deferred

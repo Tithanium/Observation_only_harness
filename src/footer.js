@@ -577,7 +577,7 @@ const dim = (s) => FG_DIM + s + FG_RESET;
  *  padding, both sides truncate cell-exact, and a too-wide line keeps the left and
  *  drops the right. Returns a "\n"-joined STRING — the chart splits it into its
  *  bottom-pinned rows, the line mode prints it as its footer lines. */
-export function renderFooter({ usage, model, rate, lastUsage, statuses, providers = 0, cwd, width = 120 } = {}) {
+export function renderFooter({ usage, model, rate, lastUsage, statuses, providers = 0, cwd, width = 120, contextUsage } = {}) {
   const known = (v) => typeof v === "number" && Number.isFinite(v) && v > 0;
   const W = Math.max(40, width);
   // line 1 — the dim cwd (home-folded) + ` (branch)`, the ⚡ speed right-aligned
@@ -617,16 +617,32 @@ export function renderFooter({ usage, model, rate, lastUsage, statuses, provider
   const usingSubscription = model?.provider === "kimi-coding";
   const usageCost = usage?.cost ?? 0;
   if (usageCost > 0 || usingSubscription) parts.push(`$${usageCost.toFixed(3)}${usingSubscription ? " (sub)" : ""}`);
-  // pi's context display (footer.js:99-101, 137-151): the window falls back to 0
-  // (NOT "?" — pi's no-model case renders `0.0%/0`), and `?` is only the
-  // post-compaction no-usage state (unreachable here — no compaction, so the
-  // percent never goes null and the "?" branch is a harmless verbatim copy).
+  // pi's context display (footer.js:99-101, 137-151, fed by
+  // agent-session.getContextUsage): the window falls back to 0 (NOT "?" — pi's
+  // no-model case renders `0.0%/0`). THE PERCENT comes from the session's live
+  // CONTEXT-USAGE state when one exists (the compaction driver, src/compaction.js,
+  // sets client.contextUsage after every turn and compaction — pi's footer reads
+  // session.getContextUsage() every frame): right after a compaction there is
+  // no post-compaction assistant usage yet → percent null → `?/<window>` until
+  // the next LLM response (pi's exact display); afterwards the pi-style estimate
+  // (last valid assistant usage + trailing chars/4). NO state (legacy paths:
+  // the injected suites, clients without the driver) → the historical
+  // session-cumulative totalTokens formula, byte-identical to before.
   // ` (auto)` is pi's default (autoCompactEnabled true at startup, i-mode:365);
-  // obs has no compaction to toggle it off.
+  // the harness auto-compacts by default too (settings.json "compaction"
+  // can disable it — the indicator stays (auto), pi's toggle is a settings
+  // menu the harness does not port).
   const contextWindow = model?.contextWindow ?? 0;
-  const total = known(usage?.totalTokens) ? usage.totalTokens : null;
-  const percent = total === null ? 0 : Math.min(100, (total / (model?.contextWindow || 1)) * 100);
-  const contextPercent = percent !== null ? percent.toFixed(1) : "?";
+  let percent;
+  if (contextUsage && typeof contextUsage.percent === "number") {
+    percent = Math.min(100, contextUsage.percent);
+  } else if (contextUsage && contextUsage.percent === null) {
+    percent = null; // pi: post-compaction — unknown until the next response
+  } else {
+    const total = known(usage?.totalTokens) ? usage.totalTokens : null;
+    percent = total === null ? 0 : Math.min(100, (total / (contextWindow || 1)) * 100);
+  }
+  const contextPercent = percent === null ? "?" : percent.toFixed(1);
   const autoIndicator = " (auto)";
   const contextPercentDisplay = contextPercent === "?"
     ? `?/${formatTokens(contextWindow)}${autoIndicator}`
@@ -709,6 +725,7 @@ export function footerLine(client, { perTurn = false, cwd, providers, width } = 
     usage: perTurn ? client?.usage : client?.totals,
     lastUsage: client?.usage, // pi's CH% = the LAST assistant message's usage (obs: the last round trip's)
     model: client?.model,
+    contextUsage: client?.contextUsage, // pi's getContextUsage state (the compaction driver) — the ctx % of a compacted session
     rate: perTurn ? client?.meter?.lastRate : client?.meter?.rate,
     statuses: getExtensionStatuses(), // pi's line-3 extension statuses (empty Map → no line)
     providers: typeof providers === "number" ? providers : Object.keys(loadProviders()).length || 1,

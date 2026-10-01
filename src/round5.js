@@ -21,7 +21,9 @@ import { realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import { interactivePreflight, pdfWaitLine, settleWorkingFolder } from "./map_walk.js";
 import { createClient } from "./client.js";
+import { loadSettings } from "./config.js";
 import { footerLine } from "./footer.js";
+import { createCompactionDriver } from "./compaction.js"; // pi's auto-compaction — the one-shot run gets the SAME overflow recovery + threshold check as the interactive session
 import { buildHarnessTools, driveTurn, harnessSystemPrompt } from "./session.js";
 import { runInteractiveSession } from "./interactive.js";
 
@@ -151,6 +153,20 @@ try {
     const client = await createClient({ provider: overrides.provider, model: overrides.model, apiKey: overrides.apiKey });
     const toolsMap = await buildHarnessTools(settledWorkDir);
     const messages = [];
+    // THE COMPACTION DRIVER (pi's auto-compaction, src/compaction.js) — a
+    // one-shot exchange can still overflow (up to MAX_TURNS tool rounds of big
+    // reads), so it gets the SAME protection as the interactive session: a
+    // context-overflow round trip is compacted + retried once, a threshold /
+    // silent-overflow finish compacts. No store (the one-shot saves nothing —
+    // the compaction lives in the live array only); observation lines go to
+    // stdout like the tool lines.
+    const compactionDriver = createCompactionDriver({
+      getMessages: () => messages,
+      getStore: () => undefined,
+      settings: () => loadSettings(),
+      output: (s) => process.stdout.write(s + "\n"),
+      screen: null,
+    });
     const { text } = await driveTurn(client, messages, {
       workDir: settledWorkDir,
       // BUG FIX: `message` was missing here — the one-shot's typed message never
@@ -159,6 +175,7 @@ try {
       message,
       systemPrompt: harnessSystemPrompt(),
       toolsMap,
+      compaction: compactionDriver,
       output: (s) => process.stdout.write(s + "\n"),
     });
     if (!text) {

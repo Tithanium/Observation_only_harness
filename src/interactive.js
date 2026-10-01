@@ -30,8 +30,9 @@ import { basename, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { createInterface } from "node:readline";
 import { createClient } from "./client.js";
-import { loadProviders } from "./config.js"; // /model selector: the dot-folder models.json providers are the available-models list (pi's model registry)
-import { footerLine } from "./footer.js";
+import { loadProviders, loadSettings } from "./config.js"; // /model selector: the dot-folder models.json providers are the available-models list (pi's model registry); loadSettings: the compaction driver's live settings (the dot-folder settings.json "compaction" overrides)
+import { formatTokens, footerLine } from "./footer.js";
+import { createCompactionDriver, isCompactionSummaryMessage } from "./compaction.js"; // pi's context compaction — auto (threshold + overflow recovery inside driveTurn) + /compact (the manual path)
 import { driveTurn, harnessSystemPrompt, isAbortError, toolsPromptLines } from "./session.js";
 import { createSubagentTool, getLastSubagentContext, subagentContextLines } from "./subagent_tool.js";
 import { handleCommand, slashProposalItems, slashProposalLines, userDotDir } from "./commands.js";
@@ -64,6 +65,15 @@ function screenEntriesFor(messages) {
   const out = [];
   for (const m of messages) {
     if (!m || typeof m !== "object") continue;
+    // THE COMPACTION SUMMARY row (the head summary message — the LLM context
+    // checkpoint): the chart shows it COMPACT (pi's compaction-summary block is
+    // its own collapsible row) — the full summary text stays in the LLM payload,
+    // never painted row by row.
+    if (isCompactionSummaryMessage(m)) {
+      const before = m.compaction?.tokensBefore;
+      out.push({ kind: "plain", text: `[compaction] context compacted${typeof before === "number" ? ` (${formatTokens(before)} tokens summarized into a checkpoint)` : " (checkpoint)"}` });
+      continue;
+    }
     const blocks = Array.isArray(m.content) ? m.content : [];
     for (const b of blocks) {
       if (b?.type === "thinking" && b.thinking) out.push({ kind: "thinking", text: b.thinking });
@@ -582,6 +592,7 @@ function contentText(content) {
 
 function entryLabel(e) {
   if (e.type === "model_change") return `model: ${e.provider ?? "?"}/${e.modelId ?? "?"}`;
+  if (e.type === "compaction") return `compaction: history compacted${typeof e.tokensBefore === "number" ? ` (${formatTokens(e.tokensBefore)} tokens before)` : ""} — kept recent context`; // pi's tree shows the compaction ENTRY as its own row
   if (e.type !== "message") return String(e.type);
   const m = e.message;
   const t = (contentText(m?.content) || "").replace(/\s+/g, " ").trim();
@@ -822,6 +833,25 @@ export async function runInteractiveSession(opts) {
       s.appendHead?.({ sections: { tools: toolsPromptLines().join("\n") }, toolsAdded: toolsMap?.tools ?? [] });
       return s;
     })();
+  // THE COMPACTION DRIVER (src/compaction.js — pi's auto-compaction + /compact):
+  // created ONCE, it follows the session's LIVE bindings — client / messages /
+  // store are re-assigned by /model /reload /new /resume /tree, and the driver's
+  // closures (getMessages / getStore) always see the CURRENT ones. driveTurn
+  // receives it as `options.compaction` (pi's AgentSession compaction members):
+  // the automatic threshold + overflow cases run around every round trip,
+  // /compact runs the manual path. Settings read AT CALL TIME (loadSettings —
+  // a /reload picking up a new "compaction" block takes effect on the next
+  // compaction, no restart). Line mode: the driver's observation lines print
+  // through `out`; chart mode: the compaction shows as a [compaction] transcript
+  // row (screenEntriesFor) — no duplicate print.
+  const compactionDriver = createCompactionDriver({
+    getMessages: () => messages,
+    getStore: () => store,
+    settings: () => loadSettings(),
+    output: (s) => out(s),
+    screen,
+  });
+  compactionDriver.adoptStore(store); // an injected/resumed store (opts.store) may already carry a compaction boundary — restore it (a fresh store: no boundary, a no-op)
   let picker = null; // an ACTIVE /resume or /tree choice (Ctrl+C cancels it instead of quitting)
   let lastSigInt = 0; // dedupe one action per physical Ctrl+C press (a real terminal may surface the signal on both the input stream AND the interface)
   const reader = createLineReader({
@@ -1078,8 +1108,36 @@ export async function runInteractiveSession(opts) {
         messages.length = 0;
         store = createSessionStore({ workDir }); // round 17: a FRESH session file (deferred — written at the next first assistant message)
         store.appendHead?.({ sections: { tools: toolsPromptLines().join("\n") }, toolsAdded: toolsMap?.tools ?? [] }); // round 19: the new session opens with the same payload root (sections + declared tool schemas)
+        compactionDriver.adoptStore(store); // a fresh store: no compaction boundary — the footer's ctx state resets with it
+        compactionDriver.refreshContextUsage(client); // publish the reset (no boundary → the historical ctx display comes back)
         if (screen) screen.replaceTranscript([]); // round 17: the chart forgets the previous conversation — the main area refills from the next turn
         out("new session — transcript reset");
+      }
+      if (cmd.action === "compact") {
+        // PI'S /compact (AgentSession.compact — the MANUAL path): prepare →
+        // summarize (a standalone round trip, the working indicator covers it)
+        // → the compaction entry lands in the store → the live transcript is
+        // rebuilt in place (summary checkpoint + the kept recent tail) → the
+        // footer shows `?/<window>` until the next response. The optional
+        // free-text argument is the summarizer's "Additional focus" (pi's
+        // customInstructions). pi's "abort the in-flight operation first" is a
+        // no-op here: commands run BETWEEN turns, nothing is in flight. pi's
+        // guards surface as their exact messages ("Already compacted" /
+        // "Nothing to compact (session too small)").
+        try {
+          const { tokensAfter } = await compactionDriver.compactManual(client, cmd.arg || undefined);
+          if (screen) {
+            screen.replaceTranscript(screenEntriesFor(messages)); // the chart shows the COMPACTED transcript — the [compaction] row + the kept tail
+            screen.setFooter(client); // the ctx % goes `?/…` until the next response (pi)
+          } else {
+            out(`compacted context — ${formatTokens(tokensAfter)} tokens kept`); // the driver already printed the before → after line in line mode
+            out(footerLine(client));
+          }
+        } catch (error) {
+          if (screen) screen.error(`compaction failed: ${error?.message ?? error}`);
+          else out(`compaction failed: ${error?.message ?? error}`);
+        }
+        continue;
       }
       if (cmd.action === "resume") {
         // Round 17: pi's resume picker — the CURRENT work dir's saved sessions.
@@ -1100,7 +1158,9 @@ export async function runInteractiveSession(opts) {
         const descriptor = saved.find((s) => s.file === picked.id);
         try {
           store = loadSessionStore(descriptor.file); // the transcript RELOADS from the file, the conversation continues at its ACTIVE LEAF (same file keeps receiving appends)
-          messages = store.getMessages();
+          messages = store.getMessages(); // compaction-AWARE (session_store.getMessages: the latest compaction entry on the path → its summary checkpoint + the kept tail — a compacted session resumes COMPACTED, pi's reload-after-compaction)
+          compactionDriver.adoptStore(store); // restore the compaction boundary from the branch (the footer's `?/<window>` state)
+          compactionDriver.refreshContextUsage(client);
           if (screen) screen.replaceTranscript(screenEntriesFor(messages)); // round 17: the chart shows the RESUMED conversation in the main area (banner + footer stay)
           out(`resumed ${basename(descriptor.name)} — continuing at the active leaf (${messages.length} message(s) in context)`);
         } catch (error) {
@@ -1158,7 +1218,9 @@ export async function runInteractiveSession(opts) {
         if (entry.type === "message" && entry.message?.role === "user") {
           store.branch(entry.parentId); // a USER message branches from its PARENT (pi: newLeafId = targetEntry.parentId); its text lands in the input line
           const text = contentText(entry.message.content);
-          messages = store.getMessages();
+          messages = store.getMessages(); // compaction-aware — branching BEFORE a compaction restores the FULL pre-compaction context (the entry is off the path)
+          compactionDriver.adoptStore(store); // the boundary follows the NEW active path
+          compactionDriver.refreshContextUsage(client);
           if (screen) screen.replaceTranscript(screenEntriesFor(messages)); // round 17: the chart shows the BRANCH point's conversation (new leaf = the branch point)
           out(`editor: ${text}`);
           if (input.isTTY && reader.rl) {
@@ -1176,8 +1238,10 @@ export async function runInteractiveSession(opts) {
             }
           }
         } else {
-          store.branch(entry.id); // assistant / tool / model_change → continue from THAT entry (pi: newLeafId = targetId)
-          messages = store.getMessages();
+          store.branch(entry.id); // assistant / tool / model_change → continue from THAT entry (pi: newLeafId = targetId) — picking a COMPACTION entry continues from just after that compaction (its kept tail, nothing after it yet)
+          messages = store.getMessages(); // compaction-aware, as above
+          compactionDriver.adoptStore(store);
+          compactionDriver.refreshContextUsage(client);
           if (screen) screen.replaceTranscript(screenEntriesFor(messages)); // round 17: the chart shows the branch point's conversation (main area refreshed, footer stays)
           out(`tree: continued at ${entry.type === "message" ? entry.message.role : entry.type}`);
         }
@@ -1203,6 +1267,7 @@ export async function runInteractiveSession(opts) {
             client = await createClient({ provider, model, apiKey: overrides.apiKey });
             if (screen) client.indicator = createWorkingIndicator({ isTTY: false, stream: output });
             store.appendModelChange(client.providerId, client.modelId); // round 17: the switch is recorded in the session file
+            compactionDriver.refreshContextUsage(client); // the NEW client object carries the session's ctx state (a compacted session keeps its `?/…`/estimate display)
             // pi's /model (handleModelCommand): after setModel → footer.invalidate() —
             // the FOOTER re-renders with the new model name, the switch adds NO
             // transcript line (pi's showStatus "Model: <id>" is a transient status;
@@ -1266,6 +1331,7 @@ export async function runInteractiveSession(opts) {
           client = await createClient({ provider: picked.id.slice(0, sep), model: picked.id.slice(sep + 1), apiKey: overrides.apiKey });
           if (screen) client.indicator = createWorkingIndicator({ isTTY: false, stream: output });
           store.appendModelChange(client.providerId, client.modelId); // round 17: the switch is recorded in the session file
+          compactionDriver.refreshContextUsage(client); // the NEW client object carries the session's ctx state
           // pi's showModelSelector's selectModel: setModel → footer.invalidate() — the
           // FOOTER re-renders with the picked model, nothing enters the transcript;
           // the banner header's model row is NOT reprinted (pi keeps its startup
@@ -1283,6 +1349,7 @@ export async function runInteractiveSession(opts) {
           client = await createClient({ provider: overrides.provider, model: overrides.model, apiKey: overrides.apiKey });
           if (screen) client.indicator = createWorkingIndicator({ isTTY: false, stream: output });
           store.appendModelChange(client.providerId, client.modelId); // round 17: the reload's model is recorded too (pi: the active model lives in the session)
+          compactionDriver.refreshContextUsage(client); // the reloaded client carries the session's ctx state (and a reloaded settings.json "compaction" block takes effect at the next compaction)
           const exts = await loadExtensions(); // round 20: pi's /reload reloads extensions; round 21: the import URL key carries a per-load nonce → FRESH module copies every time, changed extension code re-runs (pi's clearExtensionCache)
           if (exts.length > 0) out(`extensions reloaded: ${exts.map((e) => "/" + e.name).join(", ")}`);
           out(`reloaded settings.json + models.json — model: ${client.providerId}/${client.modelId}`);
@@ -1349,6 +1416,7 @@ export async function runInteractiveSession(opts) {
               workDir,
               systemPrompt,
               toolsMap,
+              compaction: compactionDriver, // pi's auto-compaction (threshold + overflow recovery) around the round trips
               signal: controller.signal,
               message: followText,
               onPartial: screen ? (partial) => screen.updateStream(partial) : undefined,
@@ -1440,6 +1508,7 @@ export async function runInteractiveSession(opts) {
         workDir,
         systemPrompt,
         toolsMap,
+        compaction: compactionDriver, // pi's auto-compaction (threshold + overflow recovery) around the round trips — the context-overflow fix
         signal: controller.signal, // round 10: Ctrl+C aborts the in-flight request
         message: line, // post-round-12: the typed line IS the turn's message — without it the model answered "undefined"
         onPartial: screen ? (partial) => screen.updateStream(partial) : undefined, // round 16: every streamed partial assistant message is painted live — thinking in ITALIC, the final answer upright and BOLD

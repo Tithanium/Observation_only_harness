@@ -99,6 +99,36 @@ export async function createClient(overrides = {}) {
     async run(messages, options = {}) {
       return this._send({ messages, ...options });
     },
+    /** The context-compaction summarization round trip (pi's completeSimple,
+     *  dist/core/compaction/compaction.js completeSummarization): a STANDALONE
+     *  single request — NO tools (the summarizer must never call one),
+     *  `cacheRetention: "none"` (a one-off summary must not write the cache,
+     *  pi's rule), the caller's `maxTokens` cap (min(0.8 * reserveTokens,
+     *  model.maxTokens) — compaction.js). The working indicator covers the
+     *  in-flight window like _send (the user sees the compaction working);
+     *  the reply's usage folds into the session-cumulative totals (pi's footer
+     *  sums compaction-entry usage into the session totals) but NOT into the
+     *  tok/s meter (compaction output is not the model answering the user).
+     *  Resolves to the raw pi-ai AssistantMessage ({content, usage,
+     *  stopReason, ...}); a failed stream THROWS exactly like _send (aborted
+     *  → a real AbortError). */
+    async completeSummary({ systemPrompt, messages, maxTokens, signal } = {}) {
+      this.indicator.start();
+      try {
+        const stream = models.stream(model, { systemPrompt, messages }, { signal, ...(maxTokens ? { maxTokens } : {}), cacheRetention: "none" });
+        for await (const event of stream) {
+          if (event?.type === "error") {
+            if (event.reason === "aborted" || signal?.aborted) throw signal?.reason ?? new DOMException("The operation was aborted", "AbortError");
+            throw event.error ?? new Error(String(event.reason ?? "stream error"));
+          }
+        }
+        const reply = await stream.result();
+        if (reply && typeof reply === "object" && reply.usage !== undefined) addUsageToTotals(this.totals, reply.usage);
+        return reply;
+      } finally {
+        this.indicator.stop();
+      }
+    },
     /** Round 8: the working indicator — active EXACTLY over the in-flight window
      *  (start → reply), erased cleanly in `finally` so the reply and the footer
      *  follow on clean lines; silent entirely when stdout is not a TTY. Round 7:

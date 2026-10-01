@@ -135,8 +135,8 @@ Then, in the harness session:
 - The TUI starts: `◙ ` prompt, dark theme, banner (model, work dir), and a
   **footer** with input/output token counts, context size and **tok/s**
   (pi-style, pi's numbers)
-- `/` menu offers: `/new` (+ `/clear`), `/model`, `/reload`, `/resume`,
-  `/tree`, `/hotkeys`, `/quit` (+ `/exit`), the extension command
+- `/` menu offers: `/new` (+ `/clear`), `/compact`, `/model`, `/reload`,
+  `/resume`, `/tree`, `/hotkeys`, `/quit` (+ `/exit`), the extension command
   `/ALAN_connector`, and the harness additions `/help`, `/info`, `/skills`
   (plus `skill:<name>` and `agents:<name>` rows)
 - Skills loaded: `ALAN`, `ansys`, `fedoo`
@@ -194,6 +194,43 @@ user's institutional service), point `defaultProvider`/`defaultModel` in
 `$env:USERPROFILE\.Observation_only\settings.json` (and the provider entry in
 `models.json`) at any OpenAI-compatible endpoint you have; the ALAN skill and
 extension remain inert but harmless.
+
+## Context compaction (pi's auto-compact + /compact)
+
+Long sessions compact their context the way pi does — ported from pi v0.85+
+(`dist/core/compaction/` + `AgentSession._checkCompaction/_runAutoCompaction/compact`),
+live in `src/compaction.js` (driver) + `src/client.js` (`completeSummary`, the
+standalone summarization round trip) + `src/session.js` (the auto-trigger hooks
+around every `driveTurn` round trip):
+
+- **Auto-compaction** runs with no user action, in three cases (pi's cases):
+  1. **Overflow with retry** — a round trip that *failed* with a
+     context-overflow error, or came back truncated (`length` stop below the
+     model's output cap): the transcript is compacted and the SAME round trip
+     is retried **once**. A second overflow gives up with pi's exact message.
+  2. **Overflow without retry** — a *successful* response exceeded the context
+     window (silent overflow): compact, keep the response.
+  3. **Threshold** — context usage crossed `contextWindow - reserveTokens`
+     (default 128k − 16k): compact, keep the response.
+- **What compaction does** (pi's algorithm, verbatim): keep the newest
+  `keepRecentTokens` (default 20k, never cutting inside a tool call/result
+  pair), summarize the rest with a dedicated no-tools LLM call (pi's exact
+  prompts, `maxTokens = 0.8 × reserveTokens`, cache writes disabled), and
+  replace the old history with the summary as a checkpoint message at the head
+  of the transcript. Recompacting *merges* into the previous summary (pi's
+  update prompt); the compacted history stays in the session file (`/tree`
+  still shows it, branching before a compaction restores the full pre-
+  compaction context).
+- **Manual**: `/compact [instructions]` — pi's manual path (optional focus for
+  the summary). Guards: `Already compacted` / `Nothing to compact (session
+  too small)`.
+- **Footer**: after a compaction the ctx field shows `?/<window> (auto)` until
+  the next LLM response, then pi's estimate. Right after a compaction the
+  session resumes with the checkpoint + the kept tail — a `/resume` of a
+  compacted session is compacted too.
+- **Settings**: `settings.json` `"compaction"` overrides pi's defaults —
+  `{ "enabled": false }` turns auto-compaction off entirely (`/compact` stays
+  available); `reserveTokens` / `keepRecentTokens` tune the two budgets.
 
 ## Path conventions
 

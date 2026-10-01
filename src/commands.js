@@ -19,9 +19,14 @@
 // Deliberately NOT ported: /login /logout (no interactive credential flow — keys
 // resolve from files), /llama (no llama.cpp integration), /settings
 // /scoped-models /thinking (TUI menus), /session /fork /clone /import /export
-// /compact (session display / summaries / trasfer channels), /share /bug
-// /changelog (share/upload channels), /copy (no clipboard), /name /trust (no
-// session display names / trust flow). Dispatch is PURE — no I/O — so the test
+// /share /bug /changelog (share/upload channels), /copy (no clipboard),
+// /name /trust (no session display names / trust flow). /compact IS ported
+// (2026-10): pi's manual compaction — dispatch stays PURE (the I/O — the
+// summarization round trip + the transcript rebuild — belongs to the
+// interactive session's compaction driver, src/compaction.js), like /resume /
+// /tree. Auto-compaction (pi's threshold + overflow recovery) runs inside
+// driveTurn with the same driver — the session needs no command for it.
+// Dispatch is PURE — no I/O — so the test
 // suite can drive every command deterministically. A line that is a command
 // returns { action, lines, model? }; anything else returns { action: "turn" }
 // (a normal message for the LLM). Never prints secrets.
@@ -45,6 +50,7 @@ export const COMMANDS = [
   { name: "/quit", usage: "/quit", describe: "quit the harness (alias: /exit)" },
   { name: "/new", usage: "/new", describe: "reset the transcript — fresh session, same work dir" },
   { name: "/clear", usage: "/clear", describe: "alias for /new — pi's former /clear (pi renamed it to /new; its clear handler is handleClearCommand, interactive-mode.js:5528)" },
+  { name: "/compact", usage: "/compact [instructions]", describe: "manually compact the session context into a summary (pi's /compact — auto-compaction also runs at the context threshold / on overflow)" },
   { name: "/info", usage: "/info", describe: "session facts: provider, model, work dir, footer" },
   { name: "/model", usage: "/model [<provider/model>]", describe: "Select model (opens selector UI)" },
   { name: "/hotkeys", usage: "/hotkeys", describe: "keyboard shortcuts (enter, arrows, home/end, ctrl+o, ctrl+c, ctrl+d)" },
@@ -252,6 +258,8 @@ export function handleCommand(line, ctx = {}) {
     case "/new":
     case "/clear": // pi's former /clear — pi's CHANGELOG: "Renamed /clear to /new"; pi's clear IS the new-session path (handleClearCommand → runtimeHost.newSession, interactive-mode.js:5528-5542), which obs's action "new" already ports. The old name stays as an alias (obs keeps /exit → /quit the same way)
       return { action: "new" };
+    case "/compact": // pi's /compact (slash-commands.js + AgentSession.compact): manual compaction — the optional free-text argument becomes the summarizer's "Additional focus" (pi's customInstructions); the round trip + rebuild live in the interactive session (src/compaction.js driver), the dispatch stays pure
+      return { action: "compact", arg };
     case "/info":
       return {
         action: "show",
