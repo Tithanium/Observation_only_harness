@@ -2,6 +2,22 @@
 
 ## 2026-10-01
 
+* **Session: Removed map_folder creation from harness start** (2026-10-01T19:11:48.676Z)
+  * **Summary**: The observation harness no longer builds folder maps at launch; it now only settles the required working directory and runs the recursive PDF→TXT conversion over it.
+  * **Decisions**:
+    * map_folder.md / map_folder_full.md creation (round-2 map_folder_walk) is removed: at the start of the harness the map_folder creation is skipped, since the harness now ships its own ls/grep/find tools for folder exploration
+    * The working-directory question stays REQUIRED at launch (interactivePreflight unchanged; a --work-dir on the CLI still counts as specified)
+    * The PDF→TXT conversion now runs UNCONDITIONALLY and RECURSIVELY once the working folder is settled (pdf2text.py over the whole tree, best-effort: a missing python or failing PDF never aborts the launch); the old y/n conversion gate and the folder-count confirmation gate are gone
+    * The settings key create_folder_path and the config switch resolveCreateFolderPath were deleted as dead code
+  * **Changes**:
+    * src/map_walk.js rewritten: only preflightQuestion/interactivePreflight, pdf2TextScriptPath/runPdf2Text, pdfWaitLine and the new settleWorkingFolder(root, {preflight, waiting}) remain (mapFolderWalk, scanTree, fullMapContent, finalConfirm/interactiveConfirm, convertQuestion/interactiveConvert, mapWaitLine removed)
+    * src/round5.js calls settleWorkingFolder; mapRef/fullMapRef removed from the runInteractiveSession and driveTurn options
+    * src/session.js userContent(message) now returns the bare message (no map door); driveTurn no longer takes mapRef/fullMapRef
+    * src/interactive.js: mapRef/fullMapRef removed from session opts, cmdCtx and drive calls; /info description updated
+    * README.md and .Observation_only/settings.json updated (create_folder_path removed)
+  * **Open questions**:
+    * The map_folder.md skip-list entries in .Observation_only/extensions/git_it.ts are now vestigial (no map files are produced) — left in place as harmless
+
 * **Session: /tree was faulty — pi's /tree method imported (row/entry zip mismatch + navigation-semantics gaps)** (2026-10-01T20:55:00.000Z)
   * **Summary**: The /tree picker selected the WRONG entry on any branched session. Root cause (diagnosed against pi 0.86.1: dist/core/agent-session.js navigateTree ~:2578, dist/core/session-manager.js getTree :1023 / buildSessionContext :235, dist/modes/interactive/components/tree-selector.js TreeList): the old code walked the store's tree for DISPLAY (renderTreeLines — pre-order walk) and then ZIPPED the rows against store.getEntries() (append order) with `items = entries.map((e, i) => ({ id: e.id, line: rows[i] }))`. The two orders diverge the moment a session branches (the whole point of /tree): row i displayed entry X's text but Enter selected entry Y. Reproduced: 5-entry branched session → 2/5 rows mismatched, INCLUDING the row carrying the `• ` active-leaf marker selecting a different branch. Secondary gaps vs pi's method: (1) no no-op guard — pi's navigateTree returns "Already at this point" when the target IS the current leaf; the old code re-branched, and if the leaf was a USER entry it even moved the leaf BACK to the entry's parent; (2) the picker opened at row 0 instead of the active leaf (pi: initialSelectedId ?? currentLeafId via findNearestVisibleIndex — nearest visible ancestor walk, last entry fallback); (3) `• ` marked only the leaf, pi marks EVERY entry of the active root→leaf path (activePathIds); (4) the selected user entry's text overwrote the input line unconditionally — pi fills the editor ONLY when it is empty (`result.editorText && !editor.getText().trim()`).
   * **Decisions**:
