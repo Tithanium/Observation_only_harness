@@ -1,0 +1,6 @@
+{
+  "defaultProvider": "mock",
+  "defaultModel": "mock-1",
+  "theme": "dark",
+  "lastChangelogVersion": "0.86.1"
+}

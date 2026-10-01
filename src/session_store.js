@@ -1,0 +1,280 @@
+// src/session_store.js
+// ROUND 17 feature: session saving in the USER DOT-FOLDER — pi's
+// `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<id>.jsonl` store ported ONTO
+// THE HARNESS'S OWN dot-folder (`~/.Observation_only/sessions/...`, env override
+// OBSERVATION_ONLY_DIR honoured via userDotDir() — see src/config.js). Same JSONL
+// TREE format (header line + one entry per message, id/parentId links, active
+// leaf = last appended id), same per-work-dir path encoding (`--` + cwd stripped
+// of its leading separator with [/\\:] → '-' + `--`, e.g. C:\Users\x →
+// `--C--Users--x--`), and the same append-after-every-turn auto-save with pi's
+// EXACT deferred rule: no file is written until the FIRST ASSISTANT message
+// (entries buffer in memory; the header + all buffered entries are written at
+// that point, then every later entry appends). One entry per message:
+//   {type:"session", version:3, id, timestamp, cwd}
+//   {type:"message", id (8-hex randomUUID slice), parentId (the previous entry),
+//    timestamp (ISO), message:{role, content:[...blocks], timestamp (ms)}}
+//   {type:"model_change", id, parentId, timestamp, provider, modelId}
+// Reload rebuilds the entries + the active leaf from the file; branch(entryId)
+// moves the leaf inside the SAME file (pi's /tree). loadSessionStore() opens an
+// existing file for continuation (flushed — appends go straight to disk). The
+// one-shot path never touches this module. Never prints secrets.
+import { randomUUID } from "node:crypto";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { userDotDir } from "./config.js";
+
+export const SESSION_VERSION = 3;
+
+/** pi's EXACT cwd → sessions-subdir encoding (dist/core/session-manager.js:
+ *  getDefaultSessionDirPath): `--` + cwd stripped of its leading separator with
+ *  [/\\:] mapped to '-' + `--`. Windows C:\Users\x → `--C--Users--x--`;
+ *  POSIX /home/x → `--home-x--`. */
+export function encodeWorkDir(cwd) {
+  return `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+}
+
+/** The sessions root under the harness's dot-folder: <userDotDir()>/sessions
+ *  (pi: <agentDir>/sessions — this harness's agent dir IS its user dot-folder). */
+export function sessionsBaseDir() {
+  return join(userDotDir(), "sessions");
+}
+
+/** The per-work-dir sessions folder (encoding at call time; the env override
+ *  OBSERVATION_ONLY_DIR therefore works from tests and CLI alike). */
+export function sessionDirFor(workDir) {
+  return join(sessionsBaseDir(), encodeWorkDir(workDir));
+}
+
+function parseLine(line) {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return null;
+  }
+}
+
+/** The saved sessions of the CURRENT work dir: one descriptor per <file>.jsonl
+ *  under the encoded dir, newest first (the filename's leading ISO timestamp
+ *  sorts recency), each with the file's first user-message preview so the picker
+ *  can show what the saved conversation is about. Missing/empty sessions dir →
+ *  [] (never an error — '/resume: no sessions'). */
+export function listSessions(workDir) {
+  const dir = sessionDirFor(workDir);
+  let names;
+  try {
+    names = readdirSync(dir).filter((n) => n.endsWith(".jsonl"));
+  } catch {
+    return [];
+  }
+  names.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0)); // timestamp-prefixed names, newest first
+  return names.map((name) => {
+    const file = join(dir, name);
+    let preview = "";
+    try {
+      const lines = readFileSync(file, "utf8").split("\n");
+      for (const raw of lines) {
+        const e = parseLine(raw);
+        if (e?.type === "message" && e.message?.role === "user") {
+          preview = textOfBlocks(e.message.content) || preview;
+          break;
+        }
+      }
+    } catch {
+      /* an unreadable session file still lists by name */
+    }
+    return { file, name, preview };
+  });
+}
+
+function textOfBlocks(content) {
+  const blocks = Array.isArray(content) ? content : [];
+  return blocks
+    .filter((b) => b?.type === "text" && b.text)
+    .map((b) => b.text)
+    .join("");
+}
+
+/** The stored message is TRANSCRIPT-safe JSON: role + a content array of blocks +
+ *  the tool fields the harness transcript uses. The user message stored is the
+ *  RAW typed line (pi stores the actual user message — the harness's map door is
+ *  added to the in-memory transcript per turn, never to the stored line). */
+function normalizeMessage(m) {
+  const raw = m ?? {};
+  const content = Array.isArray(raw.content) ? raw.content : [{ type: "text", text: String(raw.content ?? "") }];
+  const out = { role: raw.role, content, timestamp: raw.timestamp ?? Date.now() };
+  const extras = ["toolCallId", "toolName", "isError", "details", "usage", "stopReason", "responseId", "api", "provider", "model"];
+  for (const k of extras) if (raw[k] !== undefined) out[k] = raw[k];
+  return out;
+}
+
+function newEntryId(byId) {
+  for (let i = 0; i < 100; i++) {
+    const id = randomUUID().slice(0, 8);
+    if (!byId.has(id)) return id;
+  }
+  return randomUUID();
+}
+
+/** Shared factory. `file` undefined → a FRESH session (deferred header — nothing
+ *  touches the disk until the first assistant message); `file` given → an OPEN
+ *  session (resume): already flushed, further entries append to that very file. */
+function makeStore(state) {
+  const { dir, file, header, sessionId, entries, byId } = state;
+  let leafId = state.leafId ?? null;
+  let rootId = state.rootId ?? null; // the HEAD entry's id (round 19): the file's ROOT — pi's first line is {type:"message", parentId:null, message:{role:"system", …sections+toolsAdded…}} — the payload of the launch; the first real message is its child; it is NEVER LLM context again (getMessages filters role "system")
+  let flushed = Boolean(state.flushed);
+
+  function persist(next) {
+    const hasAssistant = entries.some((e) => e.type === "message" && e.message?.role === "assistant");
+    if (!hasAssistant) return; // pi's rule: no file is created until the FIRST ASSISTANT message
+    if (!flushed) {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(file, [header, ...entries].map((e) => JSON.stringify(e)).join("\n") + "\n");
+      flushed = true;
+    } else {
+      appendFileSync(file, JSON.stringify(next) + "\n");
+    }
+  }
+
+  function appendEntry(entry) {
+    const e = {
+      ...entry,
+      id: entry.id ?? newEntryId(byId),
+      parentId: entry.parentId ?? leafId ?? rootId, // pi: the first real entry is the HEAD's child (rootId); afterwards the active leaf
+      timestamp: entry.timestamp ?? new Date().toISOString(),
+    };
+    entries.push(e);
+    byId.set(e.id, e);
+    leafId = e.id;
+    persist(e);
+    return e.id;
+  }
+
+  /** One message appended as the child of the active leaf (the FIRST one is the
+   *  HEAD's child — pi: a fresh session's first user message has parentId =
+   *  the head id); the leaf advances. */
+  function appendMessage(message) {
+    return appendEntry({ type: "message", message: normalizeMessage(message) });
+  }
+
+  function appendModelChange(provider, modelId) {
+    return appendEntry({ type: "model_change", provider, modelId });
+  }
+
+  /** The HEAD entry (round 19): written when the session starts — pi's first
+   *  message line is the payload ROOT: role "system" with the harness system
+   *  sections + the DECLARED tool schemas (the payload the LLM round trip began
+   *  with). It attaches as the root (parentId null), NEVER advances the leaf (the
+   *  first real message becomes its child instead), and never counts as the
+   *  deferring "assistant" message. A store that already has entries (an
+   *  injected store in the suites, a resumed session) stays untouched. */
+  function appendHead({ sections = {}, toolsAdded = [] } = {}) {
+    if (entries.length > 0 || rootId) return; // only the VERY FIRST entry of a fresh store
+    const e = {
+      type: "message",
+      id: newEntryId(byId),
+      parentId: null,
+      timestamp: new Date().toISOString(),
+      message: { role: "system", content: "", sections, toolsAdded, timestamp: Date.now() },
+    };
+    entries.push(e);
+    byId.set(e.id, e);
+    rootId = e.id; // leafId stays null — the first real message links to the HEAD (pi's user-message parentId = head id)
+  }
+  /** Move the active leaf (pi's branch — /tree stays in the SAME file). */
+  function branch(targetId) {
+    leafId = targetId ?? null;
+    return leafId;
+  }
+
+  function getEntries() {
+    return entries.slice();
+  }
+
+  function getEntry(id) {
+    return byId.get(id) ?? null;
+  }
+
+  function getBranch() {
+    const path = [];
+    let cur = leafId ? byId.get(leafId) : undefined;
+    while (cur) {
+      path.push(cur);
+      cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+    }
+    path.reverse();
+    return path;
+  }
+
+  /** The transcript to CONTINUE with: the root→leaf path reduced to what the LLM
+   *  round trip accepts ({role, content[, toolCallId/toolName/isError]} — pi's
+   *  buildContextEntries: model_change entries and friends are not LLM context). */
+  function getMessages() {
+    return getBranch()
+      .filter((e) => e.type === "message" && e.message?.role !== "system") // the head is the FILE's payload root (content "" + sections/toolsAdded), NOT conversation context — the harness sends its own systemPrompt
+      .map((e) => {
+        const m = e.message;
+        const out = { role: m.role, content: m.content };
+        if (m.toolCallId !== undefined) out.toolCallId = m.toolCallId;
+        if (m.toolName !== undefined) out.toolName = m.toolName;
+        if (m.isError !== undefined) out.isError = m.isError;
+        return out;
+      });
+  }
+
+  return { dir, file, header, sessionId, appendMessage, appendHead, appendModelChange, branch, getEntries, getEntry, getBranch, getMessages, leafId: () => leafId };
+}
+
+/** A FRESH session for the interactive launch (/new re-creates one): pi's deferred
+ *  header — mkdir + the <fileTimestamp>_<sessionId>.jsonl file happen at the
+ *  first ASSISTANT message. No I/O here. */
+export function createSessionStore({ workDir }) {
+  const dir = sessionDirFor(workDir);
+  const sessionId = randomUUID();
+  const timestamp = new Date().toISOString();
+  const header = { type: "session", version: SESSION_VERSION, id: sessionId, timestamp, cwd: workDir };
+  const file = join(dir, `${timestamp.replace(/[:.]/g, "-")}_${sessionId}.jsonl`);
+  const entries = [];
+  const byId = new Map();
+  return makeStore({ dir, file, header, sessionId, entries, byId, leafId: null, flushed: false });
+}
+
+/** REOPEN a saved session (the /resume picker's Enter): parse the file, rebuild
+ *  the entries + the active leaf (last appended id), keep appending to THE SAME
+ *  file (the conversation continues at its active leaf). A missing/unreadable or
+ *  non-session file throws (the caller turns it into a message line). */
+export function loadSessionStore(filePath) {
+  const lines = existsSync(filePath) ? readFileSync(filePath, "utf8").split("\n") : [];
+  const entries = [];
+  const byId = new Map();
+  let header = null;
+  let leafId = null;
+  for (const raw of lines) {
+    const e = parseLine(raw);
+    if (!e) continue;
+    if (e.type === "session") {
+      if (header) continue;
+      header = e;
+      continue;
+    }
+    if (e.id !== undefined && e.id !== null) {
+      entries.push(e);
+      byId.set(e.id, e);
+      leafId = e.id;
+    }
+  }
+  if (!header || header.type !== "session" || typeof header.id !== "string") {
+    throw new Error(`Not a harness session file: ${filePath}`);
+  }
+  return makeStore({
+    dir: dirname(filePath),
+    file: filePath,
+    header,
+    sessionId: header.id,
+    entries,
+    byId,
+    leafId,
+    flushed: true,
+  });
+}

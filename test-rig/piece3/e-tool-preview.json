@@ -1,0 +1,10 @@
+[
+  { "wait": { "marker": "New session started", "count": 1, "idleAfter": 500 }, "maxMs": 45000, "type": "" },
+  { "wait": { "idle": 300 }, "maxMs": 10000, "type": "ten.txt" },
+  { "wait": { "idle": 150 }, "maxMs": 10000, "type": "<enter>" },
+  { "wait": { "marker": "\"url\": \"ten.txt\"", "idleAfter": 400 }, "maxMs": 20000, "type": "" },
+  { "wait": { "marker": "(2 more lines,", "idleAfter": 400 }, "maxMs": 10000, "type": "" },
+  { "wait": { "marker": "answered fine", "count": 1, "idleAfter": 500 }, "maxMs": 20000, "type": "" },
+  { "wait": { "idle": 300 }, "maxMs": 10000, "type": "<c-c>" },
+  { "wait": { "marker": "bye", "count": 1, "idleAfter": 300 }, "maxMs": 10000, "type": "" }
+]

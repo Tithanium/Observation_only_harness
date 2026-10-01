@@ -1,0 +1,7 @@
+node_modules/
+*.log
+.env
+# credentials — keep local only, never push
+**/auth.json
+# session transcripts — machine-local, never push
+**/sessions/

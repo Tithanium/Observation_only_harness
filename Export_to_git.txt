@@ -1,0 +1,61 @@
+Observation_only_harness — export / setup notes
+===============================================
+
+PREREQUISITES (any computer)
+- Node.js >= 22.19          (check: node -v)
+- Reachable ALAN model server, as configured in .Observation_only/settings.json
+
+----------------------------------------------------------------
+ON A NEW COMPUTER — make the project work straight ahead
+(includes all extensions, skills, agents, models, settings)
+----------------------------------------------------------------
+Windows PowerShell:
+
+  cd C:\where\you\want\the\installation\folder
+  git clone https://github.com/Tithanium/Observation_only_harness.git
+  cd Observation_only_harness
+  npm install
+  Move-Item .\.Observation_only $env:USERPROFILE\.Observation_only
+  cmd /c mklink /J .\.Observation_only $env:USERPROFILE\.Observation_only
+  node src\round5.js --interactive
+
+bash (macOS/Linux):
+
+  cd /where/you/want/the/installation/folder
+  git clone https://github.com/Tithanium/Observation_only_harness.git
+  cd Observation_only_harness
+  npm install
+  mv .Observation_only ~/.Observation_only
+  ln -s ~/.Observation_only .Observation_only
+  node src/round5.js --interactive
+
+WHY THESE LINES
+- The harness ALWAYS reads its config from the user profile
+  (%USERPROFILE%\.Observation_only / ~/.Observation_only) — never from the
+  project folder (src/config.js). So step 4 installs the config there:
+  settings.json, models.json, extensions/ (ALAN connector), skills/, agents/.
+- Step 5 re-creates the junction (Windows) / symlink (unix) inside the
+  project that points back to the profile config. With it in place, git in
+  the project folder tracks the live config files automatically — same
+  setup as the original machine. Skip step 5 if you only want to RUN, not
+  develop.
+- If a .Observation_only already exists in the profile, remove or merge it
+  first (Move-Item / mv will refuse to overwrite).
+- What is NOT in git (by design, see .gitignore): node_modules/ (npm install
+  recreates it), *.log, .env, **/auth.json (ALAN credentials — re-run the
+  /ALAN_connector command inside the harness to regenerate them),
+  **/sessions/ (transcripts — regenerated per machine).
+
+----------------------------------------------------------------
+FROM THIS COMPUTER (Tithanium dev box) — push updates to GitHub
+----------------------------------------------------------------
+Windows PowerShell:
+
+  cd C:\Users\connessn\Observation_only
+  git add -A
+  git commit -m "what changed"
+  git push
+
+- Nothing to sync: the junction means `git status` already shows live config
+  changes (settings.json, models.json, extensions, ...).
+- `git add -A` + commit + push is the whole update cycle.

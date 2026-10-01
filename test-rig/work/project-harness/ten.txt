@@ -1,0 +1,12 @@
+﻿ten-line-1 of the small file
+ten-line-2 of the small file
+ten-line-3 of the small file
+ten-line-4 of the small file
+ten-line-5 of the small file
+ten-line-6 of the small file
+ten-line-7 of the small file
+ten-line-8 of the small file
+ten-line-9 of the small file
+ten-line-10 of the small file
+ten-line-11 of the small file
+ten-line-12 of the small file

@@ -1,0 +1,14 @@
+{
+  "providers": {
+    "mock": {
+      "baseUrl": "http://127.0.0.1:8407/v1",
+      "api": "openai-completions",
+      "apiKey": "sk-mock-no-real-key",
+      "models": [
+        {
+          "id": "mock-1"
+        }
+      ]
+    }
+  }
+}

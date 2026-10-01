@@ -1,0 +1,7 @@
+# ALAN extension folder — secrets / live artifacts that must never be committed.
+# (gitignore caveat: a trailing " # comment" on a pattern line is part of the
+# pattern — comments must stand on their own line. The original inline comments
+# silently disabled both patterns below, which let these files get committed.)
+config.local.ps1
+probe_result.json
+*.log
