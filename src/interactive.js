@@ -603,8 +603,19 @@ function entryLabel(e) {
  *  different branch). Orphans (broken parent chain) are roots — pi's getTree
  *  rule, so no entry can silently vanish from the picker. The `• ` marker marks
  *  EVERY entry of the active root→leaf path (pi's activePathIds path marker),
- *  not only the leaf. Deterministic — the items are the picker's browse lines
- *  AND the suite's inspection surface. */
+ *  not only the leaf.
+ *
+ *  INDENTATION IS BY ROLE, NOT BY NESTING: every USER interaction sits at
+ *  column 0 (level 0), every ASSISTANT message and its tool results one indent
+ *  to the right (level 1), SUBAGENT results one more (level 2), etc. (see
+ *  entryLevel below). The old code indented once PER message/tool in the
+ *  parent→child chain, so the same conversation type drifted further right on
+ *  every turn; now the conversation reads as a flat outline: user prompts in a
+ *  column, the assistant's replies + tools under each, subagent output under
+ *  those. The pre-order walk is kept ONLY to order the rows (a branch stays
+ *  grouped after its fork point); it no longer contributes to the prefix.
+ *  Two spaces = one indent. Deterministic — the items are the picker's browse
+ *  lines AND the suite's inspection surface. */
 export function treeItems(store) {
   const leafId = store.leafId();
   // the ACTIVE root→leaf path (pi's buildActivePath: walk leaf → root)
@@ -616,21 +627,37 @@ export function treeItems(store) {
   }
   const roots = store.getTree();
   const items = [];
-  // iterative pre-order (pi flattens iteratively — deep trees must not overflow
-  // the stack): children are pushed in REVERSE so the first child is processed
-  // first; each frame already knows its `last` flag (its index among siblings).
+  // iterative pre-order (deep trees must not overflow the stack): children are
+  // pushed in REVERSE so the first child is processed first; the walk supplies
+  // the ROW ORDER ONLY — the indent comes from entryLevel (role-based).
   const stack = [];
-  for (let i = roots.length - 1; i >= 0; i--) stack.push({ node: roots[i], prefix: "", last: i === roots.length - 1 });
+  for (let i = roots.length - 1; i >= 0; i--) stack.push(roots[i]);
   while (stack.length) {
-    const { node, prefix, last } = stack.pop();
+    const node = stack.pop();
     const e = node.entry;
     const marker = activePath.has(e.id) ? "• " : "  "; // `• ` marks the ACTIVE PATH (pi)
-    items.push({ id: e.id, line: `${marker}${prefix}${last ? "└─ " : "├─ "}${entryLabel(e)}` });
+    items.push({ id: e.id, line: `${marker}${"  ".repeat(entryLevel(e))}${entryLabel(e)}` });
     const kids = node.children;
-    const childPrefix = prefix + (last ? "   " : "│  ");
-    for (let i = kids.length - 1; i >= 0; i--) stack.push({ node: kids[i], prefix: childPrefix, last: i === kids.length - 1 });
+    for (let i = kids.length - 1; i >= 0; i--) stack.push(kids[i]);
   }
   return items;
+}
+
+/** The INDENT LEVEL of a tree row (one level = two spaces): the indentation is
+ *  by ROLE, not by position in the parent→child chain —
+ *    level 0: user interactions (and the meta entries: the session header and
+ *             model_change — they frame the conversation, never nest in it)
+ *    level 1: assistant messages and their tool results (one indent right)
+ *    level 2: subagent tool results (toolName "subagent") — one more right,
+ *             and so on for deeper delegation
+ *  A subagent's spawned worker keeps its OWN session store, so its internal
+ *  messages never appear here — only its result row lands at level 2. */
+function entryLevel(e) {
+  if (e.type !== "message") return 0;
+  const m = e.message;
+  if (m?.role === "user") return 0;
+  if (m?.role === "toolResult" && m.toolName === "subagent") return 2;
+  return 1; // assistant, other tool results, any future role
 }
 
 /** The line-only view of treeItems() (kept export — deterministic rows, the
@@ -1117,7 +1144,7 @@ export async function runInteractiveSession(opts) {
           }
           if (startIndex < 0) startIndex = items.length - 1; // pi's fallback: last visible entry
         }
-        picker = runPicker({ reader, input: reader.input, out, title: "tree — the conversation branches · • marks the active path (↑/↓ · enter selects, esc cancels):", items, screen, startIndex });
+        picker = runPicker({ reader, input: reader.input, out, title: "tree — indentation by role: user 0 · assistant + tools 1 · subagents 2 · • marks the active path (↑/↓ · enter selects, esc cancels):", items, screen, startIndex });
         const picked = await picker.promise;
         picker = null;
         reader.drainQueued();
