@@ -15,7 +15,7 @@
 // A launch NEVER answers with a usage line. Never prints secrets.
 import { realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { interactiveConfirm, interactiveConvert, interactivePreflight, mapFolderWalk, mapWaitLine } from "./map_walk.js";
+import { interactiveConfirm, interactiveConvert, interactivePreflight, mapFolderWalk } from "./map_walk.js";
 import { createClient } from "./client.js";
 import { footerLine } from "./footer.js";
 import { buildHarnessTools, driveTurn, harnessSystemPrompt } from "./session.js";
@@ -130,7 +130,6 @@ try {
     // folder; non-TTY (one-shot/piped/suites) never converts (a side effect needs
     // an explicit human yes → auto-NO, keeping the deterministic runs unchanged).
     convert: screen ? interactiveConvert : async () => false,
-    waiting: screen ? undefined : ({ root, folders }) => process.stdout.write(mapWaitLine({ root, folders }) + "\n"),
   });
   const settledWorkDir = walk.root; // the SETTLED working folder — the "[o]ther" target when the user chose to move
   // The door refs are relative to the SETTLED folder (the map files always sit AT its
@@ -169,7 +168,6 @@ try {
     // driveTurn, no unbilled one-shot turn on the empty prompt, no network request.
   } else {
     // ONE-SHOT mode: the same driveTurn, the same footer — exactly as rounds 1–7.
-    process.stdout.write(`map_folder_walk: ${mapRef}\n`); // round-8 piped shape: the walk WAITING line, the MAP line, then the reply on its own line (rounds 2/3/4 print the same door line; the round-16/17 rewrite had dropped it — restored)
     const client = await createClient({ provider: overrides.provider, model: overrides.model, apiKey: overrides.apiKey });
     const toolsMap = await buildHarnessTools(settledWorkDir);
     const messages = [];

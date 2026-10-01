@@ -907,8 +907,6 @@ export async function runInteractiveSession(opts) {
   if (screen) {
     screen.enter(); // the alternate screen — the chart owns the terminal; the footer never moves
     screen.addHeader(`\x1b[1m${MD_CODE}Observation_only\x1b[39m\x1b[22m${COLOR.dim} v${version} — observation-only harness, pi-style interaction · pi itself never modified${COLOR.fgReset}`); // STEP 5c: pi's startup template header (interactive-mode.js:697-698): bold ACCENT APP_NAME + dim version
-    screen.addHeader(`${COLOR.dim}map_folder_walk: ${mapRef}${COLOR.fgReset}`);
-    screen.addHeader(`${COLOR.dim}map_folder_full: ${fullMapRef}${COLOR.fgReset}`);
     screen.addHeader(`${COLOR.dim}work dir: ${workDir}${COLOR.fgReset}`);
     screen.addHeader(`${COLOR.dim}model: ${client.providerId}/${client.modelId}${COLOR.fgReset}`);
     screen.addHeader(`[esc] interrupt the current answer · [ctrl+c] interrupt, twice when idle = quit · [ctrl+d] quit`); // ROUND 19: the ESCAPE/INTERRUPT LEGEND of the startup header (pi's app.interrupt — the goal's escape/interrupt legend; pageUp/pageDown scroll the transcript, wheel scrolls, click jumps to the latest — pi's fullscreen TUI behavior)
@@ -921,11 +919,13 @@ export async function runInteractiveSession(opts) {
     // [Prompts] / [Themes] placeholders are GONE (there are no prompt templates / themes either);
     // the fake `[Prompt conflicts]` row was never a real diagnostic — removed (pi prints conflict
     // sections only when diagnostics exist, interactive-mode.js:1375-1408).
-    const contextFiles = [`map_folder.md`, `map_folder_full.md`];
+    const contextFiles = [];
     if (existsSync(join(userDotDir(), "AGENTS.md"))) contextFiles.push("AGENTS.md"); // the dot-folder global instructions (session.js:74)
     if (discoverAgents("both").agents.length > 0) contextFiles.push("agents/"); // the agent definition files
-    screen.addHeader(`${MD_HEADING}[Context]${COLOR.fgReset}`);
-    screen.addHeader(`${COLOR.dim}  ${contextFiles.join(", ")}${COLOR.fgReset}`);
+    if (contextFiles.length > 0) { // [Context] only shows when real instruction files are loaded (pi omits empty sections)
+      screen.addHeader(`${MD_HEADING}[Context]${COLOR.fgReset}`);
+      screen.addHeader(`${COLOR.dim}  ${contextFiles.join(", ")}${COLOR.fgReset}`);
+    }
     const startupSkills = discoverSkills(); // ~/.Observation_only/skills (SKILL.md discovery, src/skills.js)
     if (startupSkills.length > 0) {
       screen.addHeader(`${MD_HEADING}[Skills]${COLOR.fgReset}`);
@@ -941,8 +941,6 @@ export async function runInteractiveSession(opts) {
     output.on?.("resize", () => { reader.renderPrompt?.(); screen.resize(); }); // PIECE 1 (R1): a full-screen resize re-syncs the prompt region from the reader's line, then the screen FORCE-FULL-clears + repaints (screen.resize — the footer stays pinned)
     client.indicator = createWorkingIndicator({ isTTY: false, stream: output }); // round 16: in the chart the LIVE STREAM IS the working indicator — the round-9 spinner would fight the repaint; every piped/injected path keeps its exact byte behavior
   } else {
-    out(`map_folder_walk: ${mapRef}`);
-    out(`map_folder_full: ${fullMapRef}`);
     out(`Observation_only ${version} — observation-only harness, pi-style interaction · pi itself never modified`);
     out(`work dir: ${workDir}`);
     out(`model: ${client.providerId}/${client.modelId}`);

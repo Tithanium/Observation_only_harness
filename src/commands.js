@@ -259,8 +259,6 @@ export function handleCommand(line, ctx = {}) {
           `provider: ${ctx.providerId ?? "?"}`,
           `model: ${ctx.modelId ?? "?"}`,
           `work dir: ${ctx.workDir ?? "?"}`,
-          `map_folder_walk: ${ctx.mapRef ?? "?"}`,
-          `map_folder_full: ${ctx.fullMapRef ?? "?"}`,
         ],
       };
     case "/model": // pi: with an argument → exact provider/model match → switch; NO argument → the model SELECTOR opens (the I/O belongs to the interactive session, like /resume /tree — pure dispatch here)

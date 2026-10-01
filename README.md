@@ -13,10 +13,9 @@ in the tool schema can modify user data (audit trail in
 
 | Folder | Content |
 |---|---|
-| `src/` | The harness itself — pure Node.js (≥ 22.19, **no build step**: TypeScript extensions load natively via Node's type-stripping). Entry point `src/round5.js --interactive` (the TUI); `npm start` runs the older Round-1 `src/index.js`. `src/pi-shims/` carries the pi-compatible API surface that pi-written extensions run against |
+| `src/` | The harness itself — pure Node.js (≥ 22.19, **no build step**: TypeScript extensions load natively via Node's type-stripping). Entry point `src/round5.js --interactive` (the TUI). `src/pi-shims/` carries the pi-compatible API surface that pi-written extensions run against |
 | `.Observation_only/` | The personal configuration (a copy of `%USERPROFILE%\.Observation_only`; on the dev machine it is a **junction** to it, so git tracks the live config): `extensions/` (incl. the `alan-connector/` ALAN flow), `skills/`, `agents/`, `settings.json`, `models.json` (apiKey masked), `agent/` (`models.json` masked, `models-store.json`, `bin/fd.exe` + `bin/rg.exe`) |
 | `agents/` | Standalone agent definition in development (`worker.md`) |
-| `pi-cfg/` | Empty placeholder for pi configuration references |
 | `okf/` | OKF bundle (log) for this project |
 | root | `Export_to_git.txt` (the install lines as plain text), `audit-readonly-guarantee.md` (the read-only-guarantee audit) |
 
